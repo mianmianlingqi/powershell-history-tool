@@ -1,0 +1,8 @@
+# Personal history, installation state, and local backups must stay out of Git.
+*.jsonl
+*_history.txt
+install-info.json
+*.bak
+*.tmp
+*.zip
+*.zip.sha256
