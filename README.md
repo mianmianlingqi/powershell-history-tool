@@ -1,8 +1,8 @@
-# PowerShell 历史命令工具 1.0.0
+# PowerShell 历史命令工具 1.1.0
 
 按 **Ctrl+H** 打开历史命令窗口。默认显示最近 1000 条不同命令，可通过按钮切换全部历史，支持搜索和双击选择。选中的命令只填回输入行，按回车后才执行。
 
-从 [GitHub Releases](https://github.com/mianmianlingqi/powershell-history-tool/releases/latest) 下载 `PowerShellHistoryTool-1.0.0.zip` 即可取得完整安装包。旁附 `.sha256` 文件可用于核对 ZIP 的 SHA256 校验值。
+从 [GitHub Releases](https://github.com/mianmianlingqi/powershell-history-tool/releases/latest) 下载 `PowerShellHistoryTool-1.1.0.zip` 即可取得完整安装包。旁附 `.sha256` 文件可用于核对 ZIP 的 SHA256 校验值。
 
 ## 运行要求
 
@@ -46,11 +46,42 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
 |---|---|
 | 最近 1000 条 | 按从新到旧顺序显示最近 1000 条不同命令 |
 | 全部历史 | 加载全部归档中的不同命令 |
-| 搜索框 | 在当前范围内按文字搜索，不区分大小写 |
+| 搜索框 | 在当前范围内搜索，默认不区分大小写 |
+| 右上侧搜索模式 | 包含文字、多个关键词、开头匹配、正则表达式 |
+| 区分大小写 | 对当前搜索模式启用大小写敏感匹配 |
 | 填回输入行或双击命令 | 将原始命令放回 PowerShell 输入行 |
 | 取消、Esc 或关闭窗口 | 保留原来的输入 |
 
 Ctrl+H 原有的删除前一个字符功能会被历史窗口覆盖。Backspace 键仍可使用。原有自动建议的配置不会由安装程序修改。
+
+搜索模式说明：
+
+- 包含文字：查找命令中包含的连续文字，例如 `git status`。
+- 多个关键词：用空白分隔关键词，命令必须包含全部关键词，顺序不限。例如 `git status` 也能找到 `git commit -m "status fix"`。
+- 开头匹配：只匹配命令开头，例如 `git` 不会匹配 `echo git`。
+- 正则表达式：例如 `^git\s+(status|commit)`。不合法的表达式会在状态栏提示，不会关闭窗口；单条匹配和整体扫描均设有时间限制。
+
+模式和大小写开关适用于当前选择的历史范围，切换时保留搜索文字。
+
+## Ctrl+H 偶尔失效时
+
+1.1.0 修复了一个已复现的触发条件：PSReadLine 重设编辑模式时会清空自定义键位，将 Ctrl+H 恢复成删除字符。工具现在会在下一次进入 PowerShell 命令输入前检查并恢复绑定，同时保留上一条命令的成功或失败状态。不修改用户的 prompt 函数。
+
+已有标签页升级后先执行 `. "$PROFILE"`，或者重新打开标签页。如果已有其他工具自定义了 `PSConsoleHostReadLine`，本工具会保留该自定义函数，避免覆盖其他输入功能。这种环境仍可手动恢复绑定：
+
+```powershell
+Enable-CommandHistoryShortcut -Force
+```
+
+仍然失效时，在同一标签页运行下面的命令获取版本、绑定和输入入口状态。输出不含历史命令内容：
+
+```powershell
+Get-CommandHistoryStatus | Format-List
+```
+
+快捷键仅在 PowerShell 等待输入时生效，在 Codex、Claude、Python 等正在运行的子程序内部不会截获按键。归档不可用时仍会注册快捷键，打开失败会显示原因；需要先解决文件访问问题。真实硬件按键、第三方终端拦截和窗口前台权限仍受运行环境影响，不能承诺所有间歇性失效都来自上述触发条件。
+
+自动恢复只处理未绑定或默认删除字符键位；用户在安装后主动设置的其他 Ctrl+H 功能会被保留。恢复逻辑发生异常时会继续进入正常命令输入，错误信息可在状态命令中查看。通过 `-Force` 可明确恢复本工具的绑定。
 
 ## 保存规则和数据位置
 
@@ -92,3 +123,16 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1
 - `SHA256SUMS.txt`：包内程序和说明文件的校验值。
 
 此包可复制、分发和修改，按现状提供。
+
+## 源码验证和打包
+
+仓库包含隔离测试，不会往个人归档写入测试命令：
+
+```powershell
+pwsh -NoProfile -File .\Tests\Verify-Shortcut.ps1
+pwsh -NoProfile -STA -File .\Tests\Verify-Search.ps1
+pwsh -NoProfile -File .\Tests\Verify-Install.ps1
+pwsh -NoProfile -File .\Build.ps1
+```
+
+快捷键测试验证编辑模式重设后，真实输入入口是否在调用控制台读取器前恢复绑定；最终会阻塞等待键盘的读取器在测试中替换为测试函数。它不模拟真实硬件按键或第三方终端的按键拦截。

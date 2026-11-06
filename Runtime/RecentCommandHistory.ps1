@@ -100,6 +100,47 @@ function Get-RecentPSReadLineCommand {
     }
 }
 
+function Find-CommandHistoryMatch {
+    [CmdletBinding()]
+    param(
+        [object[]]$Rows,
+        [string]$Query = '',
+        [ValidateSet('Contains', 'Keywords', 'Prefix', 'Regex')][string]$Mode = 'Contains',
+        [switch]$CaseSensitive
+    )
+    $comparison = if ($CaseSensitive) { [StringComparison]::Ordinal } else { [StringComparison]::OrdinalIgnoreCase }
+    $terms = if ($Mode -eq 'Keywords') { @($Query -split '\s+' | Where-Object { $_.Length -gt 0 }) } else { @() }
+    $regex = $null
+    if ($Mode -eq 'Regex' -and $Query.Length -gt 0) {
+        $options = [Text.RegularExpressions.RegexOptions]::CultureInvariant
+        if (-not $CaseSensitive) { $options = $options -bor [Text.RegularExpressions.RegexOptions]::IgnoreCase }
+        try { $regex = [regex]::new($Query, $options, [TimeSpan]::FromMilliseconds(50)) }
+        catch { throw '正则表达式无效，请检查括号、转义和语法。' }
+    }
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    foreach ($row in $Rows) {
+        $command = [string]$row.'命令'
+        $matched = $true
+        if ($Query.Length -gt 0) {
+            switch ($Mode) {
+                'Contains' { $matched = $command.IndexOf($Query, $comparison) -ge 0 }
+                'Prefix' { $matched = $command.StartsWith($Query, $comparison) }
+                'Keywords' {
+                    foreach ($term in $terms) {
+                        if ($command.IndexOf($term, $comparison) -lt 0) { $matched = $false; break }
+                    }
+                }
+                'Regex' {
+                    if ($clock.ElapsedMilliseconds -gt 1500) { throw '正则搜索用时过长，请简化表达式或缩小历史范围。' }
+                    try { $matched = $regex.IsMatch($command) }
+                    catch [Text.RegularExpressions.RegexMatchTimeoutException] { throw '正则匹配超时，请简化表达式。' }
+                }
+            }
+        }
+        if ($matched) { $row }
+    }
+}
+
 function New-CommandHistoryWindow {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
@@ -109,10 +150,24 @@ function New-CommandHistoryWindow {
     $form.MinimumSize = [Drawing.Size]::new(650, 400)
     $form.StartPosition = 'CenterScreen'
     $form.Font = [Drawing.Font]::new('Microsoft YaHei UI', 10)
-    $form.Tag = @{ All = @(Get-RecentPSReadLineCommand -Count 1000); AllLoaded = $false; Limit = 1000; Filtered = @(); Selected = $null }
-    $top = [Windows.Forms.FlowLayoutPanel]::new()
+    $form.Tag = @{ All = @(Get-RecentPSReadLineCommand -Count 1000); AllLoaded = $false; Limit = 1000; Mode = 'Contains'; Filtered = @(); Selected = $null }
+    $top = [Windows.Forms.TableLayoutPanel]::new()
     $top.Dock = 'Top'
-    $top.Height = 44
+    $top.AutoSize = $true
+    $top.AutoSizeMode = 'GrowAndShrink'
+    $top.ColumnCount = 2
+    $top.RowCount = 3
+    $null = $top.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::AutoSize))
+    $null = $top.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new([Windows.Forms.SizeType]::Percent, 100))
+    foreach ($index in 1..3) { $null = $top.RowStyles.Add([Windows.Forms.RowStyle]::new([Windows.Forms.SizeType]::AutoSize)) }
+    $rangePanel = [Windows.Forms.FlowLayoutPanel]::new()
+    $rangePanel.AutoSize = $true
+    $rangePanel.Dock = 'Fill'
+    $rangePanel.WrapContents = $false
+    $modePanel = [Windows.Forms.FlowLayoutPanel]::new()
+    $modePanel.AutoSize = $true
+    $modePanel.Dock = 'Fill'
+    $modePanel.FlowDirection = 'RightToLeft'
     $recent = [Windows.Forms.Button]::new()
     $recent.Text = '最近 1000 条'
     $recent.AutoSize = $true
@@ -120,11 +175,32 @@ function New-CommandHistoryWindow {
     $all.Text = '全部历史'
     $all.AutoSize = $true
     $search = [Windows.Forms.TextBox]::new()
-    $search.Width = 360
+    $search.Dock = 'Fill'
     $search.PlaceholderText = '搜索当前范围内的命令'
     $status = [Windows.Forms.Label]::new()
     $status.AutoSize = $true
-    $top.Controls.AddRange(@($recent, $all, $search, $status))
+    $caseSensitive = [Windows.Forms.CheckBox]::new()
+    $caseSensitive.Text = '区分大小写'
+    $caseSensitive.AutoSize = $true
+    $modePanel.Controls.Add($caseSensitive)
+    $modeButtons = @{}
+    foreach ($definition in @(@('Regex', '正则表达式'), @('Prefix', '开头匹配'), @('Keywords', '多个关键词'), @('Contains', '包含文字'))) {
+        $button = [Windows.Forms.RadioButton]::new()
+        $button.Text = $definition[1]
+        $button.Tag = $definition[0]
+        $button.Appearance = 'Button'
+        $button.AutoSize = $true
+        $button.Checked = $definition[0] -eq 'Contains'
+        $modeButtons[$definition[0]] = $button
+        $modePanel.Controls.Add($button)
+    }
+    $rangePanel.Controls.AddRange(@($recent, $all))
+    $top.Controls.Add($rangePanel, 0, 0)
+    $top.Controls.Add($modePanel, 1, 0)
+    $top.Controls.Add($search, 0, 1)
+    $top.SetColumnSpan($search, 2)
+    $top.Controls.Add($status, 0, 2)
+    $top.SetColumnSpan($status, 2)
     $list = [Windows.Forms.ListView]::new()
     $list.Dock = 'Fill'
     $list.View = 'Details'
@@ -153,19 +229,28 @@ function New-CommandHistoryWindow {
     $form.Tag.Status = $status
     $form.Tag.Recent = $recent
     $form.Tag.AllButton = $all
+    $form.Tag.ModeButtons = $modeButtons
+    $form.Tag.CaseSensitive = $caseSensitive
     $update = {
         param($sender, $eventArgs)
         $window = $sender.FindForm()
         $state = $window.Tag
-        $state.List.VirtualListSize = 0
         $state.List.SelectedIndices.Clear()
+        $state.List.VirtualListSize = 0
         $scope = if ($state.Limit -eq 0) { $state.All } else { @($state.All | Select-Object -First $state.Limit) }
         $term = $state.Search.Text
-        $state.Filtered = @($scope | Where-Object { $_.'命令'.IndexOf($term, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
-        $state.List.VirtualListSize = $state.Filtered.Count
-        $state.List.Invalidate()
         $state.Recent.Enabled = $state.Limit -ne 1000
         $state.AllButton.Enabled = $state.Limit -ne 0
+        $state.Status.ForeColor = [Drawing.SystemColors]::ControlText
+        try { $state.Filtered = @(Find-CommandHistoryMatch -Rows $scope -Query $term -Mode $state.Mode -CaseSensitive:$state.CaseSensitive.Checked) }
+        catch {
+            $state.Filtered = @()
+            $state.Status.Text = $_.Exception.Message
+            $state.Status.ForeColor = [Drawing.Color]::Firebrick
+            return
+        }
+        $state.List.VirtualListSize = $state.Filtered.Count
+        $state.List.Invalidate()
         $state.Status.Text = if ($state.AllLoaded) { "显示 $($state.Filtered.Count) 条，共 $($state.All.Count) 条不同命令" } else { "显示 $($state.Filtered.Count) 条，范围：最近 1000 条" }
     }
     $form.Tag.Update = $update
@@ -193,6 +278,16 @@ function New-CommandHistoryWindow {
         finally { $window.UseWaitCursor = $false }
     })
     $search.add_TextChanged($update)
+    $caseSensitive.add_CheckedChanged($update)
+    foreach ($button in $modeButtons.Values) {
+        $button.add_CheckedChanged({
+            param($sender, $e)
+            if ($sender.Checked) {
+                $sender.FindForm().Tag.Mode = [string]$sender.Tag
+                & $sender.FindForm().Tag.Update $sender $e
+            }
+        })
+    }
     $choose = {
         param($sender, $e)
         $window = $sender.FindForm()
@@ -203,7 +298,13 @@ function New-CommandHistoryWindow {
     }
     $accept.add_Click($choose)
     $list.add_DoubleClick($choose)
-    $form.add_Shown({ param($sender, $e) & $sender.Tag.Update $sender.Tag.Search $e; $null = $sender.Tag.Search.Focus() })
+    $form.add_Shown({
+        param($sender, $e)
+        $sender.BringToFront()
+        $null = $sender.Activate()
+        & $sender.Tag.Update $sender.Tag.Search $e
+        $null = $sender.Tag.Search.Focus()
+    })
     return $form
 }
 
@@ -222,7 +323,8 @@ if (-not (Get-Variable CommandHistoryArchivePath -Scope Global -ErrorAction Sile
 if (-not (Get-Variable CommandHistoryOriginalHandler -Scope Global -ErrorAction SilentlyContinue)) {
     $global:CommandHistoryOriginalHandler = (Get-PSReadLineOption).AddToHistoryHandler
 }
-Initialize-CommandHistoryArchive
+try { Initialize-CommandHistoryArchive }
+catch { Write-Warning "历史归档暂不可用，快捷键仍会注册：$($_.Exception.Message)" }
 Set-PSReadLineOption -AddToHistoryHandler {
     param($command)
     $decision = if ($null -ne $global:CommandHistoryOriginalHandler) {
@@ -236,20 +338,74 @@ Set-PSReadLineOption -AddToHistoryHandler {
     }
     return $decision
 }
-$previousBinding = Get-PSReadLineKeyHandler -Chord Ctrl+Alt+h -ErrorAction SilentlyContinue
-if ($previousBinding.Function -in @('CommandHistoryArchive', 'RecentHistory100')) {
+function global:Enable-CommandHistoryShortcut {
+    param([switch]$Force)
+    $binding = Get-PSReadLineKeyHandler -Chord Ctrl+h -ErrorAction SilentlyContinue
+    if ($null -ne $binding -and $binding.Function -eq 'CommandHistoryArchive') { return }
+    if (-not $Force -and $null -ne $binding -and $binding.Function -notin @('BackwardDeleteChar', 'Unbound')) { return }
+    Set-PSReadLineKeyHandler -Chord Ctrl+h -BriefDescription CommandHistoryArchive -LongDescription '搜索历史命令，切换最近 1000 条或全部历史' -ScriptBlock {
+        param($key, $arg)
+        try {
+            $selected = Show-CommandHistoryWindow
+            if ($null -ne $selected) {
+                $line = $null
+                $cursor = 0
+                [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+                [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, [string]$selected)
+            }
+        }
+        catch { Write-Warning "历史窗口打开失败：$($_.Exception.Message)" }
+    }
+}
+
+function global:Invoke-CommandHistoryReadLine {
+    param([bool]$LastRunStatus)
+    [Microsoft.PowerShell.PSConsoleReadLine]::ReadLine($host.Runspace, $ExecutionContext, $LastRunStatus)
+}
+
+function Get-CommandHistoryStatus {
+    $activeReader = Get-Command PSConsoleHostReadLine -ErrorAction SilentlyContinue
+    $owned = Get-Variable CommandHistoryOwnedReader -Scope Global -ErrorAction SilentlyContinue
+    $hookActive = $null -ne $activeReader -and $null -ne $owned -and $activeReader.ScriptBlock -eq $owned.Value
+    $lastError = Get-Variable CommandHistoryShortcutError -Scope Global -ErrorAction SilentlyContinue
+    $currentBinding = Get-PSReadLineKeyHandler -Chord Ctrl+h -ErrorAction SilentlyContinue
+    [pscustomobject]@{
+        ToolVersion = '1.1.0'
+        PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+        PSReadLineVersion = (Get-Module PSReadLine).Version.ToString()
+        CtrlHBinding = if ($null -ne $currentBinding) { $currentBinding.Function } else { 'Unbound' }
+        InputHook = if ($hookActive) { 'Enabled' } else { 'NotActive' }
+        LastShortcutError = if ($null -ne $lastError) { $lastError.Value } else { $null }
+        ArchiveExists = [IO.File]::Exists($global:CommandHistoryArchivePath)
+        ApartmentState = [Threading.Thread]::CurrentThread.GetApartmentState().ToString()
+    }
+}
+
+$commandHistoryPreviousBinding = Get-PSReadLineKeyHandler -Chord Ctrl+Alt+h -ErrorAction SilentlyContinue
+if ($null -ne $commandHistoryPreviousBinding -and $commandHistoryPreviousBinding.Function -in @('CommandHistoryArchive', 'RecentHistory100')) {
     Remove-PSReadLineKeyHandler -Chord Ctrl+Alt+h
 }
-Set-PSReadLineKeyHandler -Chord Ctrl+h -BriefDescription CommandHistoryArchive -LongDescription '搜索历史命令，切换最近 1000 条或全部历史' -ScriptBlock {
-    param($key, $arg)
-    try {
-        $selected = Show-CommandHistoryWindow
-        if ($null -ne $selected) {
-            $line = $null
-            $cursor = 0
-            [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-            [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, [string]$selected)
+Enable-CommandHistoryShortcut -Force
+# Recheck at the next input line; EditMode changes reset PSReadLine's key maps.
+# Keep the last command status as the first statement, matching PSReadLine itself.
+$commandHistoryReaderInfo = Get-Command PSConsoleHostReadLine -ErrorAction SilentlyContinue
+$commandHistoryOwnedReaderInfo = Get-Variable CommandHistoryOwnedReader -Scope Global -ErrorAction SilentlyContinue
+if ($null -ne $commandHistoryReaderInfo -and ($commandHistoryReaderInfo.Source -eq 'PSReadLine' -or ($null -ne $commandHistoryOwnedReaderInfo -and $commandHistoryReaderInfo.ScriptBlock -eq $commandHistoryOwnedReaderInfo.Value))) {
+    function global:PSConsoleHostReadLine {
+        [System.Diagnostics.DebuggerHidden()]
+        param()
+        $lastRunStatus = $?
+        Microsoft.PowerShell.Core\Set-StrictMode -Off
+        try {
+            Enable-CommandHistoryShortcut
+            $global:CommandHistoryShortcutError = $null
         }
+        catch { $global:CommandHistoryShortcutError = $_.Exception.Message }
+        Invoke-CommandHistoryReadLine -LastRunStatus $lastRunStatus
     }
-    catch { Write-Warning "历史窗口打开失败：$($_.Exception.Message)" }
+    $global:CommandHistoryOwnedReader = (Get-Command PSConsoleHostReadLine).ScriptBlock
+    $global:CommandHistoryInputHook = 'Enabled'
+}
+else {
+    $global:CommandHistoryInputHook = 'CustomReaderPreserved'
 }

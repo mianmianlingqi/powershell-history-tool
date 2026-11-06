@@ -46,7 +46,7 @@ if (Test-Path -LiteralPath $ProfilePath) {
     Write-Host "配置备份：$backup"
 }
 # Record ownership first so any later interrupted install can be retried or uninstalled.
-$info = [ordered]@{ Tool = 'PowerShellHistoryTool'; Version = '1.0.0'; ProfilePath = $ProfilePath; ProfileBackup = $backup; InstalledAt = [DateTime]::Now.ToString('o') }
+$info = [ordered]@{ Tool = 'PowerShellHistoryTool'; Version = '1.1.0'; ProfilePath = $ProfilePath; ProfileBackup = $backup; InstalledAt = [DateTime]::Now.ToString('o') }
 Write-HistoryToolFile -Path $infoPath -Content ($info | ConvertTo-Json)
 $runtimePath = Join-Path $InstallPath 'RecentCommandHistory.ps1'
 Copy-Item -LiteralPath $source -Destination $runtimePath -Force
