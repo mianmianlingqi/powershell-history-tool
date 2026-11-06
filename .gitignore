@@ -2,6 +2,7 @@
 *.jsonl
 *_history.txt
 install-info.json
+common-commands*.json
 *.bak
 *.tmp
 *.zip

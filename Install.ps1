@@ -12,7 +12,7 @@ $InstallPath = [IO.Path]::GetFullPath($InstallPath)
 $ProfilePath = [IO.Path]::GetFullPath($ProfilePath)
 $source = Join-Path $PSScriptRoot 'Runtime\RecentCommandHistory.ps1'
 if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw '安装包不完整：缺少 Runtime\RecentCommandHistory.ps1。' }
-foreach ($required in @('Uninstall.ps1', 'SetupHelpers.ps1')) {
+foreach ($required in @('Uninstall.ps1', 'SetupHelpers.ps1', 'Commands.ps1')) {
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $required) -PathType Leaf)) { throw "安装包不完整：缺少 $required。" }
 }
 if ($InstallPath.TrimEnd('\') -eq $PSScriptRoot.TrimEnd('\')) { throw '安装目录不能与解压目录相同。' }
@@ -46,12 +46,13 @@ if (Test-Path -LiteralPath $ProfilePath) {
     Write-Host "配置备份：$backup"
 }
 # Record ownership first so any later interrupted install can be retried or uninstalled.
-$info = [ordered]@{ Tool = 'PowerShellHistoryTool'; Version = '1.1.0'; ProfilePath = $ProfilePath; ProfileBackup = $backup; InstalledAt = [DateTime]::Now.ToString('o') }
+$info = [ordered]@{ Tool = 'PowerShellHistoryTool'; Version = '1.2.0'; ProfilePath = $ProfilePath; ProfileBackup = $backup; InstalledAt = [DateTime]::Now.ToString('o') }
 Write-HistoryToolFile -Path $infoPath -Content ($info | ConvertTo-Json)
 $runtimePath = Join-Path $InstallPath 'RecentCommandHistory.ps1'
 Copy-Item -LiteralPath $source -Destination $runtimePath -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Uninstall.ps1') -Destination (Join-Path $InstallPath 'Uninstall.ps1') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'SetupHelpers.ps1') -Destination (Join-Path $InstallPath 'SetupHelpers.ps1') -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Commands.ps1') -Destination (Join-Path $InstallPath 'Commands.ps1') -Force
 $escapedRuntime = $runtimePath.Replace("'", "''")
 $block = @'
 # >>> PowerShellHistoryTool >>>

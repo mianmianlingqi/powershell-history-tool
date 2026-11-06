@@ -1,11 +1,11 @@
 #Requires -Version 7.4
 [CmdletBinding()]
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '1.1.0',
+    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '1.2.0',
     [string]$DestinationPath = (Split-Path $PSScriptRoot -Parent)
 )
 $ErrorActionPreference = 'Stop'
-$payload = @('Install.ps1', 'Uninstall.ps1', 'SetupHelpers.ps1', 'Runtime\RecentCommandHistory.ps1', 'README.md')
+$payload = @('Install.ps1', 'Uninstall.ps1', 'SetupHelpers.ps1', 'Commands.ps1', 'Runtime\RecentCommandHistory.ps1', 'README.md')
 $buildRoot = Join-Path ([IO.Path]::GetTempPath()) ('history-build-' + [guid]::NewGuid())
 $packageName = "PowerShellHistoryTool-$Version"
 $stage = Join-Path $buildRoot $packageName
@@ -36,7 +36,7 @@ foreach ($line in $hashes) {
 $archive = [IO.Compression.ZipFile]::OpenRead($zip)
 try {
     $files = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
-    if ($files.Count -ne 6) { throw 'ZIP 文件列表与预期不一致。' }
+    if ($files.Count -ne 7) { throw 'ZIP 文件列表与预期不一致。' }
 }
 finally { $archive.Dispose() }
 $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()

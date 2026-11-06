@@ -1,8 +1,8 @@
-# PowerShell 历史命令工具 1.1.0
+# PowerShell 历史命令工具 1.2.0
 
 按 **Ctrl+H** 打开历史命令窗口。默认显示最近 1000 条不同命令，可通过按钮切换全部历史，支持搜索和双击选择。选中的命令只填回输入行，按回车后才执行。
 
-从 [GitHub Releases](https://github.com/mianmianlingqi/powershell-history-tool/releases/latest) 下载 `PowerShellHistoryTool-1.1.0.zip` 即可取得完整安装包。旁附 `.sha256` 文件可用于核对 ZIP 的 SHA256 校验值。
+从 [GitHub Releases](https://github.com/mianmianlingqi/powershell-history-tool/releases/latest) 下载 `PowerShellHistoryTool-1.2.0.zip` 即可取得完整安装包。旁附 `.sha256` 文件可用于核对 ZIP 的 SHA256 校验值。
 
 ## 运行要求
 
@@ -51,6 +51,62 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
 | 区分大小写 | 对当前搜索模式启用大小写敏感匹配 |
 | 填回输入行或双击命令 | 将原始命令放回 PowerShell 输入行 |
 | 取消、Esc 或关闭窗口 | 保留原来的输入 |
+
+## 常用命令注册
+
+点击窗口左上侧的 **常用命令**，进入单独管理的命令列表；点击 **历史记录** 返回历史。两种视图都支持四种搜索模式和大小写切换，常用命令可以搜索名称、命令内容和说明，多关键词可以跨字段匹配。
+
+- **新增**：输入名称、命令内容、说明后保存。命令支持多行。
+- **编辑**：修改已选记录的命令和说明，名称作为标识保持不变。
+- **删除**：确认后只删除已选常用命令，不影响历史。
+- **刷新**：读取用户或 agent 在其他进程新注册的记录。
+- 历史视图的 **注册所选**：将选中的历史命令预填到注册窗口，填写名称后保存。
+
+注册、编辑、查询和选择都不会执行保存的命令。选择后仅填回当前输入行，按回车才执行，届时使用当前 PowerShell 工作目录和环境。没有自动运行或启动时执行机制。
+
+在已经加载工具的 PowerShell 中，用户或 agent 可以手动注册：
+
+```powershell
+hcmd add -Name 'Git 状态' -Command 'git status' -Description '查看当前仓库状态'
+hcmd list
+hcmd list -Name 'Git 状态'
+
+# 同名名称不区分大小写；只有明确指定 Force 才更新。
+hcmd add -Name 'Git 状态' -Command 'git status --short' -Description '简洁状态' -Force
+hcmd remove -Name 'Git 状态'
+```
+
+也可使用完整 PowerShell 命令名：
+
+```powershell
+Register-CommonCommand -Name '进程列表' -Command 'Get-Process' -Description '查看运行中的进程'
+Get-CommonCommand
+Unregister-CommonCommand -Name '进程列表' -WhatIf
+```
+
+请用单引号传入希望原样保存的命令文字，避免在注册时提前展开变量。
+
+### agent 和非交互式入口
+
+无需加载 profile，无需打开界面，也无需导入 PSReadLine。默认安装后可运行：
+
+```powershell
+pwsh -NoProfile -File "$env:LOCALAPPDATA\Programs\PowerShellHistoryTool\Commands.ps1" -Action add -Name 'Git 状态' -Command 'git status' -Description 'agent 注册' -AsJson
+pwsh -NoProfile -File "$env:LOCALAPPDATA\Programs\PowerShellHistoryTool\Commands.ps1" -Action list -AsJson
+pwsh -NoProfile -File "$env:LOCALAPPDATA\Programs\PowerShellHistoryTool\Commands.ps1" -Action remove -Name 'Git 状态' -AsJson
+```
+
+自定义安装目录时替换上面的路径。解压目录中的 `Commands.ps1` 也可直接使用。`-AsJson` 输出固定为 JSON 数组；`-Force` 用于明确更新同名记录；`-RegistryPath` 可指定独立的注册表文件。错误以非零进程退出码返回，损坏的注册表不会被静默覆盖。这个入口只访问常用命令文件，不初始化历史归档或注册键位。
+
+常用命令默认保存在：
+
+```text
+%LOCALAPPDATA%\PowerShell\HistoryArchive\common-commands.json
+```
+
+名称长度为 1 至 80 个字符，不能包含换行或控制字符。名称是大小写不敏感的唯一标识，同名注册默认报错，更新会保留首次创建时间。文件更新带有进程间互斥和临时文件替换，避免并发注册覆盖其他名称。该文件为明文，只保存用户或 agent 明确注册的内容，卸载时保留，不包含在分发包中。
+
+编辑面板保存前会核对记录版本。若用户或 agent 在其他进程改过或删过该记录，面板会提示刷新，保留未保存的输入，不静默覆盖新内容。高级调用也可以将 `Get-CommonCommand` 返回的 `Revision` 传给 `Register-CommonCommand -ExpectedRevision` 做同样的检查。默认注册表使用全局命名互斥量；并发测试覆盖同一 Windows 登录会话中的多个进程，跨登录会话和不同用户权限组合未逐一实测。
 
 Ctrl+H 原有的删除前一个字符功能会被历史窗口覆盖。Backspace 键仍可使用。原有自动建议的配置不会由安装程序修改。
 
@@ -118,6 +174,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1
 - `Install.ps1`：当前用户安装程序。
 - `Uninstall.ps1`：卸载程序，保留历史数据。
 - `SetupHelpers.ps1`：配置读取和文件写入辅助函数。
+- `Commands.ps1`：供用户和 agent 使用的独立命令注册入口。
 - `Runtime/RecentCommandHistory.ps1`：工具完整源码。
 - `README.md`：本说明。
 - `SHA256SUMS.txt`：包内程序和说明文件的校验值。
@@ -132,6 +189,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1
 pwsh -NoProfile -File .\Tests\Verify-Shortcut.ps1
 pwsh -NoProfile -STA -File .\Tests\Verify-Search.ps1
 pwsh -NoProfile -File .\Tests\Verify-Install.ps1
+pwsh -NoProfile -STA -File .\Tests\Verify-CommonCommands.ps1
+pwsh -NoProfile -File .\Tests\Verify-HistorySnapshot.ps1
 pwsh -NoProfile -File .\Build.ps1
 ```
 

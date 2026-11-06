@@ -29,7 +29,9 @@ Set-PSReadLineOption -HistorySavePath $native
 $global:CommandHistoryArchivePath = Join-Path $root 'archive.jsonl'
 . (Join-Path $install 'RecentCommandHistory.ps1')
 Add-CommandHistoryArchive 'verification-command'
-Assert ((Get-CommandHistoryStatus).ToolVersion -eq '1.1.0') 'Installed version incorrect'
+Assert ((Get-CommandHistoryStatus).ToolVersion -eq '1.2.0') 'Installed version incorrect'
+$json = & pwsh -NoLogo -NoProfile -File (Join-Path $install 'Commands.ps1') -Action add -Name InstalledAgent -Command 'Get-Date' -RegistryPath $global:CommonCommandRegistryPath -AsJson
+Assert ($LASTEXITCODE -eq 0 -and @($json | ConvertFrom-Json)[0].Name -eq 'InstalledAgent') 'Installed agent entry failed'
 $extra = "# 安装后新增配置`n"
 [IO.File]::AppendAllText($profilePath, $extra)
 $sentinel = Join-Path $install 'keep.txt'
@@ -37,6 +39,7 @@ $sentinel = Join-Path $install 'keep.txt'
 & (Join-Path $install 'Uninstall.ps1') -InstallPath $install 6>$null
 Assert ([IO.File]::ReadAllText($profilePath) -eq ($original + $extra)) 'Uninstall changed user settings'
 Assert ((Test-Path -LiteralPath $global:CommandHistoryArchivePath) -and (Test-Path -LiteralPath $sentinel)) 'Uninstall deleted data'
+Assert (Test-Path -LiteralPath $global:CommonCommandRegistryPath) 'Uninstall deleted common commands'
 $blockedProfile = Join-Path $root 'locked.ps1'
 $blockedInstall = Join-Path $root 'blocked-install'
 [IO.File]::WriteAllText($blockedProfile, $original)

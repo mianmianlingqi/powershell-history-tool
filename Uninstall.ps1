@@ -29,7 +29,7 @@ if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
     }
 }
 # Delete only known application files. Keep archives, backups, and unrelated files.
-foreach ($name in @('RecentCommandHistory.ps1', 'Uninstall.ps1', 'SetupHelpers.ps1', 'install-info.json')) {
+foreach ($name in @('RecentCommandHistory.ps1', 'Commands.ps1', 'Uninstall.ps1', 'SetupHelpers.ps1', 'install-info.json')) {
     $target = Join-Path $InstallPath $name
     if (Test-Path -LiteralPath $target -PathType Leaf) { Remove-Item -LiteralPath $target -Force }
 }
